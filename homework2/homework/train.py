@@ -1,11 +1,10 @@
 import argparse
 from datetime import datetime
 from pathlib import Path
-
-import numpy as np
 import torch
+import torch.optim as optim
 import torch.utils.tensorboard as tb
-
+import numpy as np
 from .models import ClassificationLoss, load_model, save_model
 from .utils import load_data
 
@@ -35,22 +34,23 @@ def train(
     log_dir = Path(exp_dir) / f"{model_name}_{datetime.now().strftime('%m%d_%H%M%S')}"
     logger = tb.SummaryWriter(log_dir)
 
-    # note: the grader uses default kwargs, you'll have to bake them in for the final submission
+    # Load model
     model = load_model(model_name, **kwargs)
     model = model.to(device)
     model.train()
 
+    # Load data
     train_data = load_data("classification_data/train", shuffle=True, batch_size=batch_size, num_workers=2)
     val_data = load_data("classification_data/val", shuffle=False)
 
-    # create loss function and optimizer
+    # Create loss function and optimizer
     loss_func = ClassificationLoss()
-    # optimizer = ...
+    optimizer = optim.Adam(model.parameters(), lr=lr)
 
     global_step = 0
     metrics = {"train_acc": [], "val_acc": []}
 
-    # training loop
+    # Training loop
     for epoch in range(num_epoch):
         # clear metrics at beginning of epoch
         for key in metrics:
@@ -58,31 +58,60 @@ def train(
 
         model.train()
 
+        correct_train = 0
+        total_train = 0
+
+        # Training step
         for img, label in train_data:
             img, label = img.to(device), label.to(device)
 
-            # TODO: implement training step
-            raise NotImplementedError("Training step not implemented")
+            optimizer.zero_grad()  # Zero gradients from previous step
+
+            # Forward pass
+            logits = model(img)
+            loss = loss_func(logits, label)
+
+            # Backward pass and optimization
+            loss.backward()
+            optimizer.step()
+
+            # Track accuracy
+            _, predicted = torch.max(logits, 1)
+            correct_train += (predicted == label).sum().item()
+            total_train += label.size(0)
 
             global_step += 1
 
-        # disable gradient computation and switch to evaluation mode
-        with torch.inference_mode():
+        train_acc = correct_train / total_train
+        metrics["train_acc"].append(train_acc)
+
+        # Disable gradient computation for evaluation
+        with torch.no_grad():
             model.eval()
 
+            correct_val = 0
+            total_val = 0
+
+            # Validation step
             for img, label in val_data:
                 img, label = img.to(device), label.to(device)
 
-                # TODO: compute validation accuracy
-                raise NotImplementedError("Validation accuracy not implemented")
+                logits = model(img)
+                _, predicted = torch.max(logits, 1)
+                correct_val += (predicted == label).sum().item()
+                total_val += label.size(0)
 
-        # log average train and val accuracy to tensorboard
-        epoch_train_acc = torch.as_tensor(metrics["train_acc"]).mean()
-        epoch_val_acc = torch.as_tensor(metrics["val_acc"]).mean()
+            val_acc = correct_val / total_val
+            metrics["val_acc"].append(val_acc)
 
-        raise NotImplementedError("Logging not implemented")
+        # Log average train and val accuracy to tensorboard
+        epoch_train_acc = np.mean(metrics["train_acc"])
+        epoch_val_acc = np.mean(metrics["val_acc"])
 
-        # print on first, last, every 10th epoch
+        logger.add_scalar("train/accuracy", epoch_train_acc, epoch)
+        logger.add_scalar("val/accuracy", epoch_val_acc, epoch)
+
+        # Print on first, last, every 10th epoch
         if epoch == 0 or epoch == num_epoch - 1 or (epoch + 1) % 10 == 0:
             print(
                 f"Epoch {epoch + 1:2d} / {num_epoch:2d}: "
@@ -90,10 +119,8 @@ def train(
                 f"val_acc={epoch_val_acc:.4f}"
             )
 
-    # save and overwrite the model in the root directory for grading
+    # Save model
     save_model(model)
-
-    # save a copy of model weights in the log directory
     torch.save(model.state_dict(), log_dir / f"{model_name}.th")
     print(f"Model saved to {log_dir / f'{model_name}.th'}")
 
@@ -106,9 +133,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_epoch", type=int, default=50)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=2024)
-
-    # optional: additional model hyperparamters
-    # parser.add_argument("--num_layers", type=int, default=3)
 
     # pass all arguments to train
     train(**vars(parser.parse_args()))
