@@ -10,6 +10,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class ClassificationLoss(nn.Module):
@@ -25,6 +26,7 @@ class ClassificationLoss(nn.Module):
         Returns:
             tensor, scalar loss
         """
+        return F.cross_entropy(logits, target)
         raise NotImplementedError("ClassificationLoss.forward() is not implemented")
 
 
@@ -42,8 +44,10 @@ class LinearClassifier(nn.Module):
             num_classes: int, number of classes
         """
         super().__init__()
+        input_dim = 3 * h * w
+        self.classifier = nn.Linear(input_dim, num_classes)
 
-        raise NotImplementedError("LinearClassifier.__init__() is not implemented")
+        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -53,7 +57,10 @@ class LinearClassifier(nn.Module):
         Returns:
             tensor (b, num_classes) logits
         """
-        raise NotImplementedError("LinearClassifier.forward() is not implemented")
+        x = x.view(x.size(0), -1)  # (B, 3*H*W)
+        logits = self.classifier(x)
+        return logits
+        
 
 
 class MLPClassifier(nn.Module):
