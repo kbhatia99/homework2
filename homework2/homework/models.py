@@ -167,6 +167,8 @@ class MLPClassifierDeepResidual(nn.Module):
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
+        hidden_dim: int = 64,  # hidden layer dimension (width of each layer)
+        num_layers: int = 3     # number of layers
     ):
         """
         Args:
@@ -179,18 +181,52 @@ class MLPClassifierDeepResidual(nn.Module):
             num_layers: int, number of hidden layers
         """
         super().__init__()
+        input_dim = 3 * h * w  # Calculate the input dimension
 
-        raise NotImplementedError("MLPClassifierDeepResidual.__init__() is not implemented")
+        # Store layers in ModuleList to iterate over them
+        self.layers = nn.ModuleList()
+
+        # First layer (linear transformation of the input)
+        self.layers.append(nn.Linear(input_dim, hidden_dim))
+        self.layers.append(nn.ReLU())  # Non-in-place ReLU
+
+        # Add subsequent layers with residual connections
+        for _ in range(num_layers - 1):  # num_layers-1 because we already added the first layer
+            self.layers.append(nn.Linear(hidden_dim, hidden_dim))
+            self.layers.append(nn.ReLU())  # Non-in-place ReLU
+
+        # Final output layer
+        self.output_layer = nn.Linear(hidden_dim, num_classes)
+
+        # A linear layer to transform residuals to the correct dimension if needed
+        self.residual_transform = nn.Linear(input_dim, hidden_dim)
+
+        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: tensor (b, 3, H, W) image
+        x = x.view(x.size(0), -1)  # Flatten to (B, 3*H*W)
 
-        Returns:
-            tensor (b, num_classes) logits
-        """
-        raise NotImplementedError("MLPClassifierDeepResidual.forward() is not implemented")
+        # First residual transformation to match dimensions
+        residual = self.residual_transform(x)
+        for i in range(0, len(self.layers), 2):  # Skip ReLU layers
+            # Apply Linear layer
+            x = self.layers[i](x)
+            # Apply ReLU activation
+            x = self.layers[i+1](x)
+
+            # Ensure the dimensions match before adding residual
+            if x.size() != residual.size():
+                residual = self.residual_transform(x)  # Update residual to match current x size
+
+            # Add residual connection (make sure dimensions match)
+            x = x + residual  # Use out-of-place addition (avoid in-place modification)
+            residual = x  # Update residual for the next layer
+
+        # Output layer
+        logits = self.output_layer(x)
+        return logits
+
+       
 
 
 model_factory = {
